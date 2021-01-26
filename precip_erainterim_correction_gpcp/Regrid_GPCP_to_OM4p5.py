@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-# Making forcing for OM4p5
+# # Making forcing for OM4p5
 
 import xarray as xr
 import xesmf
@@ -9,31 +9,27 @@ import warnings
 import cftime
 
 
-blend_indir = '/lustre/f2/dev/Raphael.Dussin/forcings/ERAinterim'
-blend_outdir = '/lustre/f2/dev/Raphael.Dussin/forcings/ERAinterim_OM4p5'
+gpcp_indir = '/lustre/f2/dev/Raphael.Dussin/forcings/GPCP'
+gpcp_outdir = '/lustre/f2/dev/Raphael.Dussin/forcings/ERAinterim_OM4p5'
 firstyear=1979
 lastyear=2018
 
 
-## Building the grids
+# ## Building the grids
 
-# ERA-interim
-erai_grid = xr.open_dataset(f'{blend_indir}/precip_Dussin_corrected_1979_daily.nc', 
+# GPCP
+gpcp_grid = xr.open_dataset(f'{gpcp_indir}/precip.mon.mean.nc',
                             decode_times=False, 
                             drop_variables=['precip', 'time'])
 
-lon = erai_grid['lon'].values
-lon_bnds = np.concatenate((np.array([lon[0] -0.5 * 0.7031]),
-                           0.5 * (lon[:-1] + lon[1:]),
-                           np.array([lon[-1] + 0.5 * 0.7031])), axis=0)
+lon_bnds = np.concatenate([gpcp_grid['lon_bnds'].isel(nv=0).values, 
+                           np.array([gpcp_grid['lon_bnds'].isel(nv=1).values[-1]])], axis=0)
 
-lat = erai_grid['lat'].values
-lat_bnds = np.concatenate((np.array([-90]),
-                           0.5 * (lat[:-1] + lat[1:]),
-                           np.array([90])), axis=0)
+lat_bnds = np.concatenate([gpcp_grid['lat_bnds'].isel(nv=0).values, 
+                           np.array([gpcp_grid['lat_bnds'].isel(nv=1).values[-1]])], axis=0)
 
-erai_grid['lon_b'] = xr.DataArray(data=lon_bnds, dims=('lonp1'))
-erai_grid['lat_b'] = xr.DataArray(data=lat_bnds, dims=('latp1'))
+gpcp_grid['lon_b'] = xr.DataArray(data=lon_bnds, dims=('lonp1'))
+gpcp_grid['lat_b'] = xr.DataArray(data=lat_bnds, dims=('latp1'))
 
 # OM4p5
 dirgrid='/lustre/f2/pdata/gfdl/gfdl_O/datasets/OM4_05/mosaic_ocean.v20180227.unpacked'
@@ -51,7 +47,7 @@ om4_grid['lon_b'] = xr.DataArray(data=lon_b, dims=('yp1', 'xp1'))
 om4_grid['lat_b'] = xr.DataArray(data=lat_b, dims=('yp1', 'xp1'))
 
 
-regrid_conserve = xesmf.Regridder(erai_grid, om4_grid,
+regrid_conserve = xesmf.Regridder(gpcp_grid, om4_grid,
                                   method='conservative',
                                   periodic=True, reuse_weights=True)
 
@@ -68,6 +64,7 @@ def expand_time_serie(ds, timevar):
     epilogue = last_slice.copy(deep=True)
     epilogue[timevar] = last_slice[timevar] + dt
     ds_expanded = xr.concat([prologue, ds, epilogue], dim=timevar)
+    ds_expanded = ds_expanded.resample(time="1D").interpolate("linear")
     return ds_expanded
 
 
@@ -94,17 +91,19 @@ def interp_and_save_year(ds, var, time, year, outputdir, method='conservative'):
                               'long_name': 'Latitude', 
                               'standard_name': 'latitude'}
     regridded['time'].attrs = {'axis': 'T'}
-    regridded.to_netcdf(f'{outputdir}/{var}_Blend_Dussin_{year}_OM4p5_{method}.nc', 
+    regridded.to_netcdf(f'{outputdir}/{var}_GPCPv23_{year}_OM4p5_{method}.nc', 
                         format='NETCDF3_64BIT',
                         encoding=encoding, 
                         unlimited_dims=['time'])
     return None
 
 
-## Regrid precips and radiative fluxes
+## Regrid precips
 
-precip = xr.open_mfdataset(f'{blend_indir}/precip_Dussin_corrected_????_daily.nc', combine='by_coords')
+
+precip = xr.open_dataset(f'{gpcp_indir}/precip.mon.mean.nc',
+                         drop_variables=['lon_bnds', 'lat_bnds'])
 precip_expanded = expand_time_serie(precip, 'time')
 for year in range(firstyear,lastyear+1):
-    interp_and_save_year(precip_expanded,'precip','time', year, blend_outdir)
+    interp_and_save_year(precip_expanded,'precip','time', year, gpcp_outdir)
 
