@@ -79,7 +79,7 @@ def interp_and_save_year(ds, var, time, year, outputdir, method='conservative'):
     elif method == 'patch':
         regridded = regrid_patch(data)
     encoding = {'time':{'units': 'days since 1900-01-01T0:00:00',
-                        'calendar': 'gregorian'},
+                        'calendar': 'gregorian', 'dtype': np.dtype('f8')},
                 'lon': {'_FillValue': 1e+20},
                 'lat': {'_FillValue': 1e+20},
                 var: {'_FillValue': 1e+20},
@@ -104,6 +104,7 @@ def interp_and_save_year(ds, var, time, year, outputdir, method='conservative'):
 precip = xr.open_dataset(f'{gpcp_indir}/precip.mon.mean.nc',
                          drop_variables=['lon_bnds', 'lat_bnds'])
 precip_expanded = expand_time_serie(precip, 'time')
+precip_expanded['precip'] = precip_expanded['precip'] / 86400.
 for year in range(firstyear,lastyear+1):
     interp_and_save_year(precip_expanded,'precip','time', year, gpcp_outdir)
 
