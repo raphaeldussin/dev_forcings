@@ -9,8 +9,8 @@ import warnings
 import cftime
 
 
-blend_indir = '/lustre/f2/dev/Raphael.Dussin/forcings/ERAinterim'
-blend_outdir = '/lustre/f2/dev/Raphael.Dussin/forcings/ERAinterim_OM4p5'
+blend_indir = '/lustre/f2/dev/Raphael.Dussin/forcings/CMT'
+blend_outdir = '/lustre/f2/dev/Raphael.Dussin/forcings/CMT_OM4p5'
 firstyear=1979
 lastyear=2018
 

@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 
-# not right, needs to remove snow first, see Regrid_rain_GPCP_to_OM4p05
-
 # # Making forcing for OM4p5
 
 import xarray as xr
@@ -12,6 +10,7 @@ import cftime
 
 
 gpcp_indir = '/lustre/f2/dev/Raphael.Dussin/forcings/GPCP'
+erai_indir = '/lustre/f2/dev/Raphael.Dussin/forcings/ERAinterim'
 gpcp_outdir = '/lustre/f2/dev/Raphael.Dussin/forcings/ERAinterim_OM4p5'
 firstyear=1979
 lastyear=2018
@@ -20,15 +19,15 @@ lastyear=2018
 # ## Building the grids
 
 # GPCP
-gpcp_grid = xr.open_dataset(f'{gpcp_indir}/precip.mon.mean.nc',
+gpcp_grid = xr.open_dataset(f'{gpcp_indir}/GPCP_v2.3_256x512.nc',
                             decode_times=False, 
                             drop_variables=['precip', 'time'])
 
-lon_bnds = np.concatenate([gpcp_grid['lon_bnds'].isel(nv=0).values, 
-                           np.array([gpcp_grid['lon_bnds'].isel(nv=1).values[-1]])], axis=0)
+lon = gpcp_grid['lon'].values
+lon_bnds = np.concatenate((np.array([lon[0] -0.5 * 0.7031]), 0.5 * (lon[:-1] + lon[1:]), np.array([lon[-1] + 0.5 * 0.7031])), axis=0)
 
-lat_bnds = np.concatenate([gpcp_grid['lat_bnds'].isel(nv=0).values, 
-                           np.array([gpcp_grid['lat_bnds'].isel(nv=1).values[-1]])], axis=0)
+lat = gpcp_grid['lat'].values
+lat_bnds = np.concatenate((np.array([-90]), 0.5 * (lat[:-1] + lat[1:]), np.array([90])), axis=0)
 
 gpcp_grid['lon_b'] = xr.DataArray(data=lon_bnds, dims=('lonp1'))
 gpcp_grid['lat_b'] = xr.DataArray(data=lat_bnds, dims=('latp1'))
@@ -54,7 +53,6 @@ regrid_conserve = xesmf.Regridder(gpcp_grid, om4_grid,
                                   periodic=True, reuse_weights=True)
 
 
-
 def expand_time_serie(ds, timevar):
     """ add first and last bogus time slices """
     first_slice = ds.isel({timevar:0})
@@ -68,6 +66,12 @@ def expand_time_serie(ds, timevar):
     ds_expanded = xr.concat([prologue, ds, epilogue], dim=timevar)
     ds_expanded = ds_expanded.resample(time="1D").interpolate("linear")
     return ds_expanded
+
+
+def make_monthly_snow(ds):
+    ds = ds.rename({'rain_time': "time"})
+    monthly = ds["rain"].resample(time='1M').mean()
+    return monthly.to_dataset(name="snow")
 
 
 def interp_and_save_year(ds, var, time, year, outputdir, method='conservative'):
@@ -103,10 +107,24 @@ def interp_and_save_year(ds, var, time, year, outputdir, method='conservative'):
 ## Regrid precips
 
 
-precip = xr.open_dataset(f'{gpcp_indir}/precip.mon.mean.nc',
-                         drop_variables=['lon_bnds', 'lat_bnds'])
-precip_expanded = expand_time_serie(precip, 'time')
-precip_expanded['precip'] = precip_expanded['precip'] / 86400.
+precip = xr.open_dataset(f'{gpcp_indir}/GPCP_v2.3_256x512.nc').sel(time=slice('1979','2018'))
+snow = xr.open_mfdataset(f"{erai_indir}/snow_ERAinterim_*", combine='by_coords')
+snow_monthly = make_monthly_snow(snow)
+
+snow_monthly["time"] = precip["time"]
+snow_monthly["lon"] = precip["lon"]
+snow_monthly["lat"] = precip["lat"]
+
+darain = ((precip["precip"] / 86400) - snow_monthly["snow"]).clip(min=0)
+rain = darain.to_dataset(name="rain").chunk({})
+
+rain.to_netcdf('GPCP_rain_1979-2018.nc', format="NETCDF3_64BIT", unlimited_dims=["time"])
+
+rain_update = xr.open_dataset('GPCP_rain_1979-2018.nc')
+
+rain_expanded = expand_time_serie(rain_update, 'time')
+
 for year in range(firstyear,lastyear+1):
-    interp_and_save_year(precip_expanded,'precip','time', year, gpcp_outdir)
+    print(f"working on {year}")
+    interp_and_save_year(rain_expanded,'rain','time', year, gpcp_outdir)
 
